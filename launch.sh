@@ -19,7 +19,6 @@ OPENCLAW_ENV_FILE="${OPENCLAW_ENV_FILE:-$HOME/.openclaw/.env}"
 LAUNCH_REPO_URL="${LAUNCH_REPO_URL:-https://github.com/liveaverage/launch-openclaw.git}"
 LAUNCH_REPO_REF="${LAUNCH_REPO_REF:-main}"
 LAUNCH_REPO_DIR="${LAUNCH_REPO_DIR:-$HOME/launch-openclaw}"
-OPENCLAW_BOOTSTRAP_SKIP_CODE_SERVER="${OPENCLAW_BOOTSTRAP_SKIP_CODE_SERVER:-0}"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_HOME="${HOME}"
 
@@ -135,19 +134,6 @@ get_node_major() {
   fi
 
   node -p "process.versions.node.split('.')[0]" 2>/dev/null || printf '0\n'
-}
-
-load_openclaw_env() {
-  if [[ -f "$OPENCLAW_ENV_FILE" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$OPENCLAW_ENV_FILE"
-    set +a
-  fi
-
-  append_path_if_dir "$HOME/.npm-global/bin"
-  append_path_if_dir "$HOME/.local/bin"
-  append_path_if_dir "$HOME/bin"
 }
 
 is_openclaw_configured() {
@@ -374,98 +360,6 @@ enable_code_server_service() {
   fi
 }
 
-get_gateway_token() {
-  local token
-
-  if [[ -n "${OPENCLAW_GATEWAY_TOKEN:-}" ]]; then
-    printf '%s\n' "${OPENCLAW_GATEWAY_TOKEN}"
-    return 0
-  fi
-
-  set +e
-  token="$(openclaw config get gateway.auth.token 2>/dev/null | sed -n '1p')"
-  local status=$?
-  set -e
-
-  if [[ "$status" -eq 0 && -n "$token" && "$token" != "null" && "$token" != "undefined" ]]; then
-    printf '%s\n' "$token"
-    return 0
-  fi
-
-  return 1
-}
-
-start_gateway() {
-  local gateway_log="$1"
-  local pid_file="$2"
-
-  if [[ -f "$pid_file" ]]; then
-    local existing_pid
-    existing_pid="$(sed -n '1p' "$pid_file" 2>/dev/null || true)"
-    if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
-      log "OpenClaw gateway already running with PID $existing_pid"
-      printf '%s\n' "$existing_pid"
-      return 0
-    fi
-  fi
-
-  log "Starting OpenClaw gateway in the background"
-  nohup openclaw gateway >"$gateway_log" 2>&1 &
-  local gateway_pid=$!
-  printf '%s\n' "$gateway_pid" >"$pid_file"
-
-  sleep 3
-  kill -0 "$gateway_pid" 2>/dev/null || fail "OpenClaw gateway exited early. Check $gateway_log"
-  printf '%s\n' "$gateway_pid"
-}
-
-start_auto_approve_loop() {
-  local approval_log="$1"
-  (
-    local end_time now device_ids device_id
-    end_time=$(( $(date +%s) + 1200 ))
-
-    while true; do
-      now="$(date +%s)"
-      if [[ "$now" -ge "$end_time" ]]; then
-        exit 0
-      fi
-
-      if openclaw devices list >"$approval_log.tmp" 2>&1; then
-        device_ids="$(
-          grep -Eo '[[:alnum:]_-]{6,}' "$approval_log.tmp" \
-            | awk '!seen[$0]++'
-        )"
-        for device_id in $device_ids; do
-          openclaw devices approve "$device_id" >>"$approval_log" 2>&1 || true
-        done
-      fi
-
-      cat "$approval_log.tmp" >>"$approval_log" 2>/dev/null || true
-      rm -f "$approval_log.tmp"
-      sleep 5
-    done
-  ) >/dev/null 2>&1 &
-}
-
-print_gateway_info() {
-  local token="$1"
-  local host_name origin url code_server_origin
-
-  host_name="$(hostname 2>/dev/null || true)"
-  origin="$(derive_openclaw_origin)"
-  url="${origin}/chat?session=main"
-  code_server_origin="$(derive_code_server_origin)"
-
-  printf '\nOpenClaw Gateway Started\n'
-  printf '========================\n\n'
-  printf 'URL:\n%s\n\n' "$url"
-  printf 'API Token:\n%s\n\n' "${token:-Unavailable - review $HOME/.local/state/openclaw-bootstrap/gateway.log}"
-  printf 'Hostname:\n%s\n\n' "${host_name:-unknown}"
-  printf 'Origin:\n%s\n\n' "$origin"
-  printf 'code-server:\n%s\n' "$code_server_origin"
-}
-
 print_configuration_pending() {
   local host_name origin code_server_origin
 
@@ -482,9 +376,6 @@ print_configuration_pending() {
 }
 
 main() {
-  local state_dir gateway_log approval_log pid_file
-  local token gateway_pid
-
   require_non_root
   require_cmd id
   require_cmd sudo
@@ -492,12 +383,6 @@ main() {
   if command -v getent >/dev/null 2>&1; then
     TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
   fi
-
-  state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/openclaw-bootstrap"
-  mkdir -p "$state_dir"
-  gateway_log="$state_dir/gateway.log"
-  approval_log="$state_dir/auto-approve.log"
-  pid_file="$state_dir/gateway.pid"
 
   log "Step 1/6: Ensuring Node.js >= 22"
   ensure_node
@@ -509,38 +394,20 @@ main() {
   log "Step 3/6: Verifying OpenClaw CLI availability"
   verify_openclaw_cli
 
-  if [[ "$OPENCLAW_BOOTSTRAP_SKIP_CODE_SERVER" != "1" ]]; then
-    log "Step 4/6: Cloning the launch-openclaw repo and configuring code-server"
-    clone_or_refresh_launch_repo
-    install_code_server
-    install_code_server_extensions
-    configure_code_server
-    enable_code_server_service
+  log "Step 4/6: Cloning the launch-openclaw repo and configuring code-server"
+  clone_or_refresh_launch_repo
+  install_code_server
+  install_code_server_extensions
+  configure_code_server
+  enable_code_server_service
+
+  if is_openclaw_configured; then
+    log "Step 5/6: OpenClaw is already configured"
   else
-    log "Step 4/6: Skipping code-server bootstrap for post-configure handoff"
+    log "Step 5/6: OpenClaw onboarding is deferred to configure.sh"
   fi
-
-  if [[ "$OPENCLAW_BOOTSTRAP_SKIP_CODE_SERVER" != "1" ]] && ! is_openclaw_configured; then
-    log "Step 5/6: OpenClaw onboarding deferred to configure.sh"
-    log "Step 6/6: Printing code-server access information"
-    print_configuration_pending
-    return 0
-  fi
-
-  log "Step 5/6: Loading saved OpenClaw environment and starting the gateway"
-  load_openclaw_env
-  token="$(get_gateway_token || true)"
-  if [[ -z "$token" ]]; then
-    log "No configured gateway token found; generating one with OpenClaw doctor"
-    openclaw doctor --generate-gateway-token >/dev/null
-    token="$(get_gateway_token || true)"
-  fi
-  gateway_pid="$(start_gateway "$gateway_log" "$pid_file")"
-  log "Gateway is running with PID $gateway_pid"
-
-  log "Step 6/6: Starting auto-approval loop and printing connection information"
-  start_auto_approve_loop "$approval_log"
-  print_gateway_info "$token"
+  log "Step 6/6: Printing code-server access information"
+  print_configuration_pending
 }
 
 main "$@"
