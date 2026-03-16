@@ -19,6 +19,7 @@ OPENCLAW_ENV_FILE="${OPENCLAW_ENV_FILE:-$HOME/.openclaw/.env}"
 LAUNCH_REPO_URL="${LAUNCH_REPO_URL:-https://github.com/liveaverage/launch-openclaw.git}"
 LAUNCH_REPO_REF="${LAUNCH_REPO_REF:-main}"
 LAUNCH_REPO_DIR="${LAUNCH_REPO_DIR:-$HOME/launch-openclaw}"
+OPENCLAW_BOOTSTRAP_SKIP_CODE_SERVER="${OPENCLAW_BOOTSTRAP_SKIP_CODE_SERVER:-0}"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_HOME="${HOME}"
 
@@ -273,7 +274,7 @@ install_code_server_extensions() {
 
 configure_code_server() {
   local config_dir settings_dir settings_user_dir workspaces_dir workspace_path
-  local terminals_target code_server_origin terminal_cmd
+  local terminals_target code_server_origin terminal_cmd run_once_marker wrapper_cmd
 
   config_dir="$TARGET_HOME/.config/code-server"
   settings_dir="$TARGET_HOME/.local/share/code-server"
@@ -282,22 +283,18 @@ configure_code_server() {
   workspace_path="$workspaces_dir/openclaw-launchable.code-workspace"
   terminals_target="$TARGET_HOME/.vscode/terminals.json"
   code_server_origin="$(derive_code_server_origin)"
+  run_once_marker="$TARGET_HOME/.cache/openclaw-launchable/configure-ran"
 
   log "Configuring code-server"
-  run_as_root -u "$TARGET_USER" mkdir -p "$config_dir" "$settings_user_dir" "$workspaces_dir" "$TARGET_HOME/.vscode"
+  run_as_root -u "$TARGET_USER" mkdir -p "$config_dir" "$settings_user_dir" "$workspaces_dir" "$TARGET_HOME/.vscode" "$TARGET_HOME/.cache/openclaw-launchable"
 
-  if is_openclaw_configured; then
-    terminal_cmd=""
-  else
-    terminal_cmd="bash -lc 'cd $(printf '%q' "$LAUNCH_REPO_DIR") && bash $(printf '%q' "$LAUNCH_REPO_DIR/configure.sh"); exec bash -l'"
-  fi
+  wrapper_cmd="mkdir -p \"${TARGET_HOME}/.cache/openclaw-launchable\" && if [[ -f \"${run_once_marker}\" ]]; then printf 'OpenClaw configure autorun already ran. Opening a fresh login shell.\\n\\n'; source ~/.profile >/dev/null 2>&1 || true; source ~/.bashrc >/dev/null 2>&1 || true; exec bash -l; fi; cd $(printf '%q' "$LAUNCH_REPO_DIR") && bash $(printf '%q' "$LAUNCH_REPO_DIR/configure.sh") && touch \"${run_once_marker}\"; source ~/.profile >/dev/null 2>&1 || true; source ~/.bashrc >/dev/null 2>&1 || true; exec bash -l"
+  terminal_cmd="$wrapper_cmd"
 
   run_as_root -u "$TARGET_USER" tee "$terminals_target" >/dev/null <<EOF
 {
-  "autorun": $( [[ -n "$terminal_cmd" ]] && printf 'true' || printf 'false' ),
+  "autorun": true,
   "terminals": [
-$( if [[ -n "$terminal_cmd" ]]; then
-     cat <<JSON
     {
       "name": "openclaw-configure",
       "description": "OpenClaw first-run configuration",
@@ -307,8 +304,6 @@ $( if [[ -n "$terminal_cmd" ]]; then
         "$(json_escape "$terminal_cmd")"
       ]
     }
-JSON
-   fi )
   ]
 }
 EOF
@@ -514,14 +509,18 @@ main() {
   log "Step 3/6: Verifying OpenClaw CLI availability"
   verify_openclaw_cli
 
-  log "Step 4/6: Cloning the launch-openclaw repo and configuring code-server"
-  clone_or_refresh_launch_repo
-  install_code_server
-  install_code_server_extensions
-  configure_code_server
-  enable_code_server_service
+  if [[ "$OPENCLAW_BOOTSTRAP_SKIP_CODE_SERVER" != "1" ]]; then
+    log "Step 4/6: Cloning the launch-openclaw repo and configuring code-server"
+    clone_or_refresh_launch_repo
+    install_code_server
+    install_code_server_extensions
+    configure_code_server
+    enable_code_server_service
+  else
+    log "Step 4/6: Skipping code-server bootstrap for post-configure handoff"
+  fi
 
-  if ! is_openclaw_configured; then
+  if [[ "$OPENCLAW_BOOTSTRAP_SKIP_CODE_SERVER" != "1" ]] && ! is_openclaw_configured; then
     log "Step 5/6: OpenClaw onboarding deferred to configure.sh"
     log "Step 6/6: Printing code-server access information"
     print_configuration_pending

@@ -114,8 +114,8 @@ main() {
   run_noninteractive_onboarding
   write_env_file
 
-  log "OpenClaw configuration complete; re-running launch.sh to start the gateway"
-  exec "$SCRIPT_DIR/launch.sh"
+  log "OpenClaw configuration complete; re-running launch.sh without code-server bootstrap"
+  exec env OPENCLAW_BOOTSTRAP_SKIP_CODE_SERVER=1 "$SCRIPT_DIR/launch.sh"
 }
 
 main "$@"
