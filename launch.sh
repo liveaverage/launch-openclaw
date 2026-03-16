@@ -19,6 +19,7 @@ OPENCLAW_ENV_FILE="${OPENCLAW_ENV_FILE:-$HOME/.openclaw/.env}"
 LAUNCH_REPO_URL="${LAUNCH_REPO_URL:-https://github.com/liveaverage/launch-openclaw.git}"
 LAUNCH_REPO_REF="${LAUNCH_REPO_REF:-main}"
 LAUNCH_REPO_DIR="${LAUNCH_REPO_DIR:-$HOME/launch-openclaw}"
+CODE_SERVER_THEME_URL="${CODE_SERVER_THEME_URL:-https://raw.githubusercontent.com/NVIDIA/OpenShell-Community/main/brev/nemoclaw-plugin/nv-theme-0.0.1.vsix}"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_HOME="${HOME}"
 
@@ -257,7 +258,16 @@ install_code_server() {
 }
 
 install_code_server_extensions() {
+  local config_dir theme_vsix
+
+  config_dir="$TARGET_HOME/.config/code-server"
+  theme_vsix="$config_dir/nv-theme-0.0.1.vsix"
+
   log "Installing code-server extensions"
+  run_as_root -u "$TARGET_USER" mkdir -p "$config_dir"
+  curl -fsSL "$CODE_SERVER_THEME_URL" -o "$theme_vsix"
+  run_as_root chown "$TARGET_USER:$TARGET_USER" "$theme_vsix"
+  run_as_root -H -u "$TARGET_USER" env HOME="$TARGET_HOME" code-server --install-extension "$theme_vsix" --force >/dev/null
   run_as_root -H -u "$TARGET_USER" env HOME="$TARGET_HOME" code-server --install-extension fabiospampinato.vscode-terminals --force >/dev/null
 }
 
@@ -303,6 +313,20 @@ JSON
 }
 EOF
 
+  run_as_root -u "$TARGET_USER" tee "$settings_user_dir/settings.json" >/dev/null <<EOF
+{
+  "workbench.colorTheme": "NV Theme",
+  "workbench.startupEditor": "readme",
+  "window.menuBarVisibility": "classic",
+  "security.workspace.trust.enabled": false,
+  "telemetry.telemetryLevel": "off",
+  "update.mode": "none",
+  "donations.disablePrompt": true,
+  "extensions.ignoreRecommendations": true,
+  "workbench.tips.enabled": false
+}
+EOF
+
   run_as_root -u "$TARGET_USER" tee "$config_dir/config.yaml" >/dev/null <<EOF
 bind-addr: 0.0.0.0:${CODE_SERVER_PORT}
 auth: none
@@ -316,11 +340,11 @@ EOF
   run_as_root -u "$TARGET_USER" tee "$settings_dir/coder.json" >/dev/null <<EOF
 {
   "query": {
-    "folder": "${TARGET_HOME}"
+    "folder": "${LAUNCH_REPO_DIR}"
   },
   "lastVisited": {
-    "url": "${workspace_path}",
-    "workspace": true
+    "url": "${LAUNCH_REPO_DIR}",
+    "workspace": false
   }
 }
 EOF
@@ -329,12 +353,12 @@ EOF
 {
   "folders": [
     {
-      "name": "Home",
-      "path": "${TARGET_HOME}"
-    },
-    {
       "name": "Launchable",
       "path": "${LAUNCH_REPO_DIR}"
+    },
+    {
+      "name": "Home",
+      "path": "${TARGET_HOME}"
     }
   ]
 }
