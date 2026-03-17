@@ -13,6 +13,7 @@ OPENCLAW_ENV_FILE="${OPENCLAW_ENV_FILE:-$OPENCLAW_ENV_DIR/.env}"
 OPENCLAW_MODEL="${OPENCLAW_MODEL:-nvidia/nemotron-3-super-120b-a12b}"
 OPENCLAW_BASE_URL="${OPENCLAW_BASE_URL:-https://integrate.api.nvidia.com/v1}"
 OPENCLAW_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/openclaw-bootstrap"
+OPENCLAW_CONTEXT_WINDOW="${OPENCLAW_CONTEXT_WINDOW:-128000}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
@@ -303,6 +304,31 @@ run_noninteractive_onboarding() {
     --custom-compatibility openai
 }
 
+set_model_context_window() {
+  local config_file tmp_file
+
+  config_file="$HOME/.openclaw/openclaw.json"
+  [[ -f "$config_file" ]] || fail "OpenClaw config not found: $config_file"
+
+  tmp_file="$(mktemp "$config_file.tmp.XXXXXX")"
+  jq --arg model_id "$OPENCLAW_MODEL" --argjson context_window "$OPENCLAW_CONTEXT_WINDOW" '
+    .models.providers |= with_entries(
+      if (.value.models | type?) == "array" then
+        .value.models |= map(
+          if .id == $model_id then
+            .contextWindow = $context_window
+          else
+            .
+          end
+        )
+      else
+        .
+      end
+    )
+  ' "$config_file" >"$tmp_file"
+  mv "$tmp_file" "$config_file"
+}
+
 main() {
   local gateway_log approval_log pid_file token gateway_pid
 
@@ -326,6 +352,7 @@ main() {
 
     [[ -n "${CUSTOM_API_KEY:-}" ]] || fail "CUSTOM_API_KEY is not available"
     run_noninteractive_onboarding
+    set_model_context_window
     write_env_file
   else
     log "OpenClaw is already configured; skipping onboarding"
