@@ -15,6 +15,8 @@ fi
 
 CODE_SERVER_VERSION="${CODE_SERVER_VERSION:-4.89.1}"
 CODE_SERVER_PORT="${CODE_SERVER_PORT:-13337}"
+OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.3.13}"
+OPENCLAW_RELEASE_TAG="${OPENCLAW_RELEASE_TAG:-v2026.3.13-1}"
 OPENCLAW_ENV_FILE="${OPENCLAW_ENV_FILE:-$HOME/.openclaw/.env}"
 LAUNCH_REPO_URL="${LAUNCH_REPO_URL:-https://github.com/liveaverage/launch-openclaw.git}"
 LAUNCH_REPO_REF="${LAUNCH_REPO_REF:-main}"
@@ -110,6 +112,8 @@ detect_deb_arch() {
 }
 
 clone_or_refresh_launch_repo() {
+  local remote_ref
+
   log "Ensuring launch-openclaw repo is available at $LAUNCH_REPO_DIR"
 
   mkdir -p "$(dirname "$LAUNCH_REPO_DIR")"
@@ -117,7 +121,17 @@ clone_or_refresh_launch_repo() {
   if [[ -d "$LAUNCH_REPO_DIR/.git" ]]; then
     git -C "$LAUNCH_REPO_DIR" fetch --tags --prune origin
     git -C "$LAUNCH_REPO_DIR" checkout "$LAUNCH_REPO_REF"
-    git -C "$LAUNCH_REPO_DIR" pull --ff-only origin "$LAUNCH_REPO_REF"
+    remote_ref="origin/$LAUNCH_REPO_REF"
+
+    if ! git -C "$LAUNCH_REPO_DIR" diff --quiet || ! git -C "$LAUNCH_REPO_DIR" diff --cached --quiet; then
+      log "Launch repo has uncommitted changes; leaving local checkout as-is"
+    elif git -C "$LAUNCH_REPO_DIR" merge-base --is-ancestor HEAD "$remote_ref"; then
+      git -C "$LAUNCH_REPO_DIR" merge --ff-only "$remote_ref"
+    elif git -C "$LAUNCH_REPO_DIR" merge-base --is-ancestor "$remote_ref" HEAD; then
+      log "Launch repo has local commits ahead of $remote_ref; leaving local checkout as-is"
+    else
+      log "Launch repo has diverged from $remote_ref; leaving local checkout as-is"
+    fi
   elif [[ -e "$LAUNCH_REPO_DIR" ]]; then
     fail "Launch repo target exists but is not a git checkout: $LAUNCH_REPO_DIR"
   else
@@ -134,6 +148,14 @@ get_node_major() {
   fi
 
   node -p "process.versions.node.split('.')[0]" 2>/dev/null || printf '0\n'
+}
+
+get_openclaw_version() {
+  if ! command -v openclaw >/dev/null 2>&1; then
+    return 1
+  fi
+
+  openclaw --version 2>/dev/null | grep -Eo '[0-9]{4}\.[0-9]+\.[0-9]+(-[0-9]+)?' | head -n 1
 }
 
 is_openclaw_configured() {
@@ -186,18 +208,24 @@ ensure_node() {
 }
 
 ensure_openclaw_installed() {
-  local npm_prefix npm_global_bin
+  local npm_prefix npm_global_bin installed_version
 
   append_path_if_dir "$HOME/.npm-global/bin"
   append_path_if_dir "$HOME/.local/bin"
   append_path_if_dir "$HOME/bin"
 
   if command -v openclaw >/dev/null 2>&1; then
-    log "OpenClaw CLI already present at $(command -v openclaw)"
+    installed_version="$(get_openclaw_version || true)"
+    if [[ "$installed_version" == "$OPENCLAW_VERSION" ]]; then
+      log "OpenClaw CLI already present at $(command -v openclaw) (version ${installed_version})"
+    else
+      log "OpenClaw CLI version mismatch at $(command -v openclaw): found ${installed_version:-unknown}, need ${OPENCLAW_VERSION}"
+      log "Installing pinned OpenClaw npm package ${OPENCLAW_VERSION} for GitHub release ${OPENCLAW_RELEASE_TAG}"
+      npm install -g --prefix "$HOME/.npm-global" "openclaw@${OPENCLAW_VERSION}"
+    fi
   else
-    log "Installing OpenClaw with the official installer (onboarding disabled)"
-    require_cmd curl
-    curl -fsSL https://openclaw.ai/install.sh | OPENCLAW_NO_ONBOARD=1 bash
+    log "Installing pinned OpenClaw npm package ${OPENCLAW_VERSION} for GitHub release ${OPENCLAW_RELEASE_TAG}"
+    npm install -g --prefix "$HOME/.npm-global" "openclaw@${OPENCLAW_VERSION}"
   fi
 
   npm_prefix="$(npm config get prefix 2>/dev/null || true)"
@@ -212,6 +240,8 @@ ensure_openclaw_installed() {
   append_path_if_dir "$HOME/.local/bin"
   append_path_if_dir "$HOME/bin"
   command -v openclaw >/dev/null 2>&1 || fail "OpenClaw installation completed, but the CLI is not on PATH"
+  installed_version="$(get_openclaw_version || true)"
+  [[ "$installed_version" == "$OPENCLAW_VERSION" ]] || fail "Expected OpenClaw ${OPENCLAW_VERSION}, but found ${installed_version:-unknown}"
   log "OpenClaw CLI available at $(command -v openclaw)"
 }
 
