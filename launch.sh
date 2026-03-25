@@ -15,8 +15,10 @@ fi
 
 CODE_SERVER_VERSION="${CODE_SERVER_VERSION:-4.89.1}"
 CODE_SERVER_PORT="${CODE_SERVER_PORT:-13337}"
-OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.3.13}"
-OPENCLAW_RELEASE_TAG="${OPENCLAW_RELEASE_TAG:-v2026.3.13-1}"
+DEFAULT_OPENCLAW_VERSION="2026.3.13"
+DEFAULT_OPENCLAW_RELEASE_TAG="v2026.3.13-1"
+OPENCLAW_VERSION="${OPENCLAW_VERSION:-}"
+OPENCLAW_RELEASE_TAG="${OPENCLAW_RELEASE_TAG:-$DEFAULT_OPENCLAW_RELEASE_TAG}"
 OPENCLAW_ENV_FILE="${OPENCLAW_ENV_FILE:-$HOME/.openclaw/.env}"
 LAUNCH_REPO_URL="${LAUNCH_REPO_URL:-https://github.com/liveaverage/launch-openclaw.git}"
 LAUNCH_REPO_REF="${LAUNCH_REPO_REF:-main}"
@@ -158,6 +160,43 @@ get_openclaw_version() {
   openclaw --version 2>/dev/null | grep -Eo '[0-9]{4}\.[0-9]+\.[0-9]+(-[0-9]+)?' | head -n 1
 }
 
+npm_openclaw_version_exists() {
+  local version="$1"
+  [[ -n "$version" ]] || return 1
+  npm view "openclaw@${version}" version >/dev/null 2>&1
+}
+
+resolve_openclaw_version() {
+  local requested_release candidate fallback_version
+
+  if [[ -n "$OPENCLAW_VERSION" ]]; then
+    return
+  fi
+
+  requested_release="${OPENCLAW_RELEASE_TAG#v}"
+  candidate="$requested_release"
+
+  if npm_openclaw_version_exists "$candidate"; then
+    OPENCLAW_VERSION="$candidate"
+    return
+  fi
+
+  if [[ "$candidate" =~ ^(.+)-[0-9]+$ ]]; then
+    fallback_version="${BASH_REMATCH[1]}"
+    if npm_openclaw_version_exists "$fallback_version"; then
+      OPENCLAW_VERSION="$fallback_version"
+      return
+    fi
+  fi
+
+  if [[ "$OPENCLAW_RELEASE_TAG" == "$DEFAULT_OPENCLAW_RELEASE_TAG" ]]; then
+    OPENCLAW_VERSION="$DEFAULT_OPENCLAW_VERSION"
+    return
+  fi
+
+  fail "Could not resolve an OpenClaw npm version for release tag ${OPENCLAW_RELEASE_TAG}. Set OPENCLAW_VERSION explicitly if needed."
+}
+
 is_openclaw_configured() {
   [[ -f "$OPENCLAW_ENV_FILE" && -f "$HOME/.openclaw/openclaw.json" ]]
 }
@@ -213,6 +252,7 @@ ensure_openclaw_installed() {
   append_path_if_dir "$HOME/.npm-global/bin"
   append_path_if_dir "$HOME/.local/bin"
   append_path_if_dir "$HOME/bin"
+  resolve_openclaw_version
 
   if command -v openclaw >/dev/null 2>&1; then
     installed_version="$(get_openclaw_version || true)"

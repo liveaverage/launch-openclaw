@@ -114,19 +114,31 @@ code-server: http://localhost:13337
 The bootstrap is designed to be safe to run multiple times:
 
 - It skips Node installation when a compatible version is already installed.
-- It keeps OpenClaw pinned to npm version `2026.3.13` and reinstalls if another version is found on PATH.
+- It keeps OpenClaw pinned to the npm package version resolved from `OPENCLAW_RELEASE_TAG` and reinstalls if another version is found on PATH.
 - It refreshes the local `~/launch-openclaw` checkout if it already exists.
 - It skips the first-run configure terminal after both `~/.openclaw/.env` and `~/.openclaw/openclaw.json` exist.
 - It reuses a running gateway if a previously started process is still alive.
 - It keeps state under `~/.local/state/openclaw-bootstrap/`.
 
-Override the pin if needed:
+Target a GitHub release tag:
+
+```bash
+OPENCLAW_RELEASE_TAG=v2026.3.24 ./launch.sh
+```
+
+For piped execution:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/liveaverage/launch-openclaw/refs/heads/main/launch.sh | OPENCLAW_RELEASE_TAG=v2026.3.24 bash
+```
+
+Override the npm package version directly if needed:
 
 ```bash
 OPENCLAW_VERSION=2026.3.13 ./launch.sh
 ```
 
-The release tag suffix is only for GitHub releases. For `v2026.3.13-1`, the corresponding npm package version remains `2026.3.13`.
+When `OPENCLAW_VERSION` is unset, `launch.sh` now resolves it from `OPENCLAW_RELEASE_TAG`. It first tries the exact tag without the leading `v`, then falls back to removing a trailing GitHub-only `-N` suffix such as `v2026.3.13-1 -> 2026.3.13`.
 
 ### Usage
 
