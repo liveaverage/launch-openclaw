@@ -38,7 +38,7 @@ To generate an API key, visit [build.nvidia.com/settings/api-keys](https://build
    ========================
 
    URL:
-   https://openclaw0-xxxxxxxx.brevlab.com/#token=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   https://openclaw-xxxxxxxx.apps.run.brev.nvidia.com/#token=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
    API Token:
    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -47,10 +47,10 @@ To generate an API key, visit [build.nvidia.com/settings/api-keys](https://build
    brev-xxxxxxxx
 
    Origin:
-   https://openclaw0-xxxxxxxx.brevlab.com
+   https://openclaw-xxxxxxxx.apps.run.brev.nvidia.com
    ```
 
-1. Copy the full URL (looks like `https://openclaw0-xxxxxxxx.brevlab.com/#token=xxx...`) and open it in a new tab.
+1. Copy the full URL (looks like `https://openclaw-xxxxxxxx.apps.run.brev.nvidia.com/#token=xxx...`) and open it in a new tab.
 1. Click the "Connect" button to open the OpenClaw chat interface. You may need to click this button more than once.
 1. Start chatting with the agent.
 
@@ -98,8 +98,8 @@ The launchable is split into two stages:
 On hosts named like `brev-<env_id>`, the launchable derives:
 
 ```text
-OpenClaw:   https://openclaw0-<env_id>.brevlab.com/chat?session=main
-code-server: https://code-server0-<env_id>.brevlab.com
+OpenClaw:   https://openclaw-<env_id>.apps.run.brev.nvidia.com/chat?session=main
+code-server: https://code-server0-<env_id>.apps.run.brev.nvidia.com
 ```
 
 If the hostname does not match the Brev naming pattern, it falls back to:
@@ -160,7 +160,7 @@ OpenClaw Gateway Started
 ========================
 
 URL:
-https://openclaw0-<env_id>.brevlab.com/chat?session=main
+https://openclaw-<env_id>.apps.run.brev.nvidia.com/chat?session=main
 
 API Token:
 <token>
@@ -169,10 +169,10 @@ Hostname:
 brev-<env_id>
 
 Origin:
-https://openclaw0-<env_id>.brevlab.com
+https://openclaw-<env_id>.apps.run.brev.nvidia.com
 
 code-server:
-https://code-server0-<env_id>.brevlab.com
+https://code-server0-<env_id>.apps.run.brev.nvidia.com
 ```
 
 ### Logs and State

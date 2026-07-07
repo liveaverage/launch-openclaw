@@ -207,7 +207,7 @@ derive_openclaw_origin() {
   env_id="$(printf '%s\n' "$host_name" | sed -E 's/^brev-([[:alnum:]]+)$/\1/')"
 
   if [[ -n "$env_id" && "$env_id" != "$host_name" ]]; then
-    printf 'https://openclaw0-%s.brevlab.com\n' "$env_id"
+    printf 'https://openclaw-%s.apps.run.brev.nvidia.com\n' "$env_id"
   else
     printf 'http://localhost:3000\n'
   fi
@@ -219,7 +219,7 @@ derive_code_server_origin() {
   env_id="$(printf '%s\n' "$host_name" | sed -E 's/^brev-([[:alnum:]]+)$/\1/')"
 
   if [[ -n "$env_id" && "$env_id" != "$host_name" ]]; then
-    printf 'https://code-server0-%s.brevlab.com\n' "$env_id"
+    printf 'https://code-server0-%s.apps.run.brev.nvidia.com\n' "$env_id"
   else
     printf 'http://localhost:%s\n' "$CODE_SERVER_PORT"
   fi
