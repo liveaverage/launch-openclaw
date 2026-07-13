@@ -225,14 +225,26 @@ derive_openclaw_origin() {
 }
 
 configure_control_ui_origin() {
-  local origin
+  local origin legacy_origin env_id host_name
   local origins_json
 
   origin="$(derive_openclaw_origin)"
-  origins_json="$(cat <<EOF
+  host_name="$(hostname 2>/dev/null || true)"
+  env_id="$(printf '%s\n' "$host_name" | sed -E 's/^brev-([[:alnum:]]+)$/\1/')"
+
+  # Include the legacy Launchpad-hosted Skybridge origin
+  if [[ -n "$env_id" && "$env_id" != "$host_name" ]]; then
+    legacy_origin="https://openclaw-${env_id}.stg.apps.launchpad.nvidia.com"
+    origins_json="$(cat <<EOF
+["http://127.0.0.1:18789","http://localhost:18789","${origin}","${legacy_origin}"]
+EOF
+)"
+  else
+    origins_json="$(cat <<EOF
 ["http://127.0.0.1:18789","http://localhost:18789","${origin}"]
 EOF
 )"
+  fi
 
   log "Setting OpenClaw Control UI allowedOrigins to ${origins_json}"
   openclaw config set gateway.bind lan
