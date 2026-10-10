@@ -74,9 +74,9 @@ get_gateway_token_from_config_file() {
   [[ -f "$config_file" ]] || return 1
 
   if command -v jq >/dev/null 2>&1; then
-    token="$(jq -r '.gateway.auth.token // empty' "$config_file" 2>/dev/null | sed -n '1p')" || true
+    token="$(jq -r '.gateway.auth.token | select(type == "string")' "$config_file" 2>/dev/null | sed -n '1p')" || true
   else
-    token="$(node -e 'const fs=require("fs");const p=process.argv[1];const j=JSON.parse(fs.readFileSync(p,"utf8"));if(j?.gateway?.auth?.token)process.stdout.write(j.gateway.auth.token);' "$config_file" 2>/dev/null)" || true
+    token="$(node -e 'const fs=require("fs");const p=process.argv[1];const j=JSON.parse(fs.readFileSync(p,"utf8"));if(typeof j?.gateway?.auth?.token==="string")process.stdout.write(j.gateway.auth.token);' "$config_file" 2>/dev/null)" || true
   fi
 
   [[ -n "$token" && "$token" != "__OPENCLAW_REDACTED__" && "$token" != "null" ]] || return 1
@@ -115,12 +115,49 @@ get_gateway_token() {
   local status=$?
   set -e
 
-  if [[ "$status" -eq 0 && -n "$token" && "$token" != "null" && "$token" != "undefined" && "$token" != "__OPENCLAW_REDACTED__" ]]; then
+  if [[ "$status" -eq 0 && "$token" =~ ^[[:alnum:]_-]+$ && "$token" != "null" && "$token" != "undefined" && "$token" != "__OPENCLAW_REDACTED__" ]]; then
     printf '%s\n' "$token"
     return 0
   fi
 
   return 1
+}
+
+gateway_token_is_configured() {
+  [[ -n "${OPENCLAW_GATEWAY_TOKEN:-}" ]] && return 0
+  node -e '
+    const fs=require("fs");
+    try {
+      const token=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))?.gateway?.auth?.token;
+      if(typeof token==="string" ? token.trim().length : token && typeof token==="object" && token.source && token.id) process.exit(0);
+    } catch {}
+    process.exit(1);
+  ' "$HOME/.openclaw/openclaw.json"
+}
+
+get_dashboard_connection_url() {
+  local details origin
+  origin="$(derive_openclaw_origin)"
+  details="$(openclaw dashboard --no-open --json 2>/dev/null)" || return 1
+  printf '%s' "$details" | node -e '
+    const fs=require("fs");
+    try {
+      const details=JSON.parse(fs.readFileSync(0,"utf8"));
+      if(!details.ok) process.exit(1);
+      const generated=new URL(details.browserUrl || details.url);
+      const external=new URL(process.argv[1]);
+      const url=new URL(generated.pathname+generated.search+generated.hash,external);
+      const params=new URLSearchParams(url.hash.slice(1));
+      if(params.has("gatewayUrl")) {
+        const gateway=new URL(external);
+        gateway.protocol=external.protocol==="https:" ? "wss:" : "ws:";
+        gateway.pathname="/"; gateway.search=""; gateway.hash="";
+        params.set("gatewayUrl",gateway.toString());
+        url.hash=params.toString();
+      }
+      process.stdout.write(url.toString());
+    } catch { process.exit(1); }
+  ' "$origin"
 }
 
 start_gateway() {
@@ -262,7 +299,9 @@ print_gateway_info() {
 
   host_name="$(hostname 2>/dev/null || true)"
   origin="$(derive_openclaw_origin)"
-  if [[ -n "$token" ]]; then
+  if url="$(get_dashboard_connection_url)"; then
+    :
+  elif [[ -n "$token" ]]; then
     url="${origin}/#token=${token}"
   else
     url="${origin}/chat?session=main"
@@ -271,7 +310,7 @@ print_gateway_info() {
   printf '\nOpenClaw Gateway Started\n'
   printf '========================\n\n'
   printf 'URL:\n%s\n\n' "$url"
-  printf 'API Token:\n%s\n\n' "${token:-Unavailable - review $OPENCLAW_STATE_DIR/gateway.log}"
+  printf 'API Token:\n%s\n\n' "${token:-Stored as a SecretRef; use the dashboard URL above. Generate a new dashboard link if it expires.}"
   printf 'Hostname:\n%s\n\n' "${host_name:-unknown}"
   printf 'Origin:\n%s\n' "$origin"
 }
@@ -413,7 +452,7 @@ main() {
   configure_trusted_proxies
 
   token="$(get_gateway_token || true)"
-  if [[ -z "$token" ]]; then
+  if [[ -z "$token" ]] && ! gateway_token_is_configured; then
     log "No configured gateway token found; generating one with OpenClaw doctor"
     openclaw doctor --generate-gateway-token >/dev/null
     token="$(get_gateway_token || true)"

@@ -78,6 +78,48 @@ for proxies in '["100.73.87.46"]' '["127.0.0.1","::1"]' '["0.0.0.0/0"]' '["100.6
   passes=$((passes + 1))
 done
 
+for credential in literal reference missing; do
+  (
+    eval "$(sed '$d' "$ROOT/configure.sh")"
+    fixture="$(mktemp -d)"
+    trap 'rm -rf "$fixture"' EXIT
+    HOME="$fixture"
+    unset OPENCLAW_GATEWAY_TOKEN
+    mkdir -p "$HOME/.openclaw"
+    case "$credential" in
+      literal) printf '%s' '{"gateway":{"auth":{"token":"qa-fake-token"}}}' > "$HOME/.openclaw/openclaw.json" ;;
+      reference) printf '%s' '{"gateway":{"auth":{"token":{"source":"store","provider":"default","id":"gateway-token"}}}}' > "$HOME/.openclaw/openclaw.json" ;;
+      missing) printf '%s' '{"gateway":{"auth":{}}}' > "$HOME/.openclaw/openclaw.json" ;;
+    esac
+    if [[ "$credential" == missing ]]; then
+      ! gateway_token_is_configured
+    else
+      gateway_token_is_configured
+    fi
+    if [[ "$credential" == literal ]]; then
+      [[ "$(get_gateway_token_from_config_file)" == qa-fake-token ]]
+    else
+      ! get_gateway_token_from_config_file
+    fi
+  )
+  passes=$((passes + 1))
+done
+
+(
+  eval "$(sed '$d' "$ROOT/configure.sh")"
+  hostname() { printf 'brev-u1x29ihj3\n'; }
+  openclaw() {
+    [[ "$*" == 'dashboard --no-open --json' ]]
+    printf '%s' '{"ok":true,"browserUrl":"http://127.0.0.1:18789/#bootstrapToken=qa-fake-bootstrap&bootstrapProfile=main&gatewayUrl=ws%3A%2F%2F127.0.0.1%3A18789"}'
+  }
+  url="$(get_dashboard_connection_url)"
+  node -e '
+    const url=new URL(process.argv[1]); const params=new URLSearchParams(url.hash.slice(1));
+    if(url.origin!=="https://openclaw-u1x29ihj3.gobrev.dev" || params.get("bootstrapToken")!=="qa-fake-bootstrap" || params.get("gatewayUrl")!=="wss://openclaw-u1x29ihj3.gobrev.dev/") process.exit(1);
+  ' "$url"
+)
+passes=$((passes + 1))
+
 check_origin() (
   local script="$1" function="$2" host="$3" expected="$4" override="${5:-}"
   # Load function definitions without invoking the script's final main call.
