@@ -3,6 +3,81 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 passes=0
 
+for runtime in v22.23.3 v24.15.9 v24.16.0 v24.21.0 v24.16.0-rc.1 v25.0.0 v26.0.9 v26.1.0 v27.0.0 unavailable; do
+  (
+    eval "$(sed '$d' "$ROOT/launch.sh")"
+    node() { printf '%s\n' "$runtime"; }
+    case "$runtime" in
+      v24.16.0|v24.21.0|v26.1.0|v27.0.0) node_runtime_supported ;;
+      *) ! node_runtime_supported ;;
+    esac
+  )
+  passes=$((passes + 1))
+done
+
+(
+  unset OPENCLAW_VERSION OPENCLAW_RELEASE_TAG
+  eval "$(sed '$d' "$ROOT/launch.sh")"
+  [[ "$DEFAULT_OPENCLAW_VERSION" == 2026.9.9 && "$OPENCLAW_RELEASE_TAG" == v2026.9.9 ]]
+)
+passes=$((passes + 1))
+
+for migration in valid repaired unrepairable; do
+  (
+    eval "$(sed '$d' "$ROOT/configure.sh")"
+    fixture="$(mktemp -d)"
+    trap 'rm -rf "$fixture"' EXIT
+    HOME="$fixture"
+    mkdir -p "$HOME/.openclaw"
+    cp "$ROOT/README.md" "$HOME/.openclaw/openclaw.json"
+    validates=0
+    repairs=0
+    openclaw() {
+      if [[ "$1 $2" == 'config validate' ]]; then
+        validates=$((validates + 1))
+        [[ "$migration" == valid || ( "$migration" == repaired && "$validates" -gt 1 ) ]]
+      else
+        [[ "$*" == 'doctor --fix --non-interactive' ]]
+        repairs=$((repairs + 1))
+      fi
+    }
+    if [[ "$migration" == unrepairable ]]; then
+      if (ensure_config_compatible); then
+        exit 1
+      fi
+    else
+      ensure_config_compatible
+      if [[ "$migration" == valid ]]; then
+        [[ "$repairs" -eq 0 ]]
+      else
+        [[ "$repairs" -eq 1 && "$validates" -eq 2 ]]
+      fi
+    fi
+    if [[ "$migration" != valid ]]; then
+      for backup in "$HOME"/.openclaw/openclaw.json.pre-migration.*; do
+        cmp -s "$backup" "$HOME/.openclaw/openclaw.json"
+        [[ "$(ls -l "$backup" | awk '{print substr($1,1,10)}')" == '-rw-------' ]]
+      done
+    fi
+  )
+  passes=$((passes + 1))
+done
+
+for proxies in '["100.73.87.46"]' '["127.0.0.1","::1"]' '["0.0.0.0/0"]' '["100.64.0.0/10"]' '["*"]' '["0.0.0.0"]' '["::"]' '[]' 'not-json'; do
+  (
+    eval "$(sed '$d' "$ROOT/configure.sh")"
+    OPENCLAW_TRUSTED_PROXY_IPS="$proxies"
+    openclaw() {
+      [[ "$1 $2 $3" == 'config set gateway.trustedProxies' && "$4" == "$proxies" && "$5" == --strict-json ]]
+    }
+    case "$proxies" in
+      '["100.73.87.46"]'|'["127.0.0.1","::1"]') configure_trusted_proxies ;;
+      *) if (configure_trusted_proxies >/dev/null 2>&1); then exit 1; fi ;;
+    esac
+  )
+  passes=$((passes + 1))
+done
+
 check_origin() (
   local script="$1" function="$2" host="$3" expected="$4" override="${5:-}"
   # Load function definitions without invoking the script's final main call.
@@ -56,7 +131,7 @@ for configured in yes no; do
     for function in require_non_root require_cmd ensure_node ensure_openclaw_installed verify_openclaw_cli clone_or_refresh_launch_repo install_code_server install_code_server_extensions configure_code_server enable_code_server_service; do
       eval "$function() { :; }"
     done
-    node() { printf 'v22.23.3\n'; }
+    node() { printf 'v24.21.0\n'; }
     is_openclaw_configured() { [[ "$configured" == yes ]]; }
     bash() { calls="${calls}gateway "; [[ "$1" == "$LAUNCH_REPO_DIR/configure.sh" ]]; }
     print_configuration_pending() { calls="${calls}pending "; }

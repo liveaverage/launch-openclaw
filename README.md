@@ -75,8 +75,8 @@ The launchable is split into two stages:
 
 `launch.sh`:
 
-1. Ensures Node.js 22 or newer is installed.
-2. Installs the pinned OpenClaw npm package version `2026.3.13`, which corresponds to GitHub release [`v2026.3.13-1`](https://github.com/openclaw/openclaw/releases/tag/v2026.3.13-1).
+1. Ensures a supported Node.js runtime is installed (`>=24.16.0 <25` or `>=26.1.0`); installs Node.js 24 LTS when needed.
+2. Installs the pinned OpenClaw npm package version `2026.9.9`, which corresponds to the stable GitHub release [`v2026.9.9`](https://github.com/openclaw/openclaw/releases/tag/v2026.9.9).
 3. Verifies the `openclaw` CLI is available.
 4. Clones or refreshes `https://github.com/liveaverage/launch-openclaw.git` into `~/launch-openclaw` by default.
 5. Installs `code-server`, the custom NV Theme, and the `fabiospampinato.vscode-terminals` extension.
@@ -125,6 +125,8 @@ The bootstrap is designed to be safe to run multiple times:
 
 - It skips Node installation when a compatible version is already installed.
 - It keeps OpenClaw pinned to the npm package version resolved from `OPENCLAW_RELEASE_TAG` and reinstalls if another version is found on PATH.
+- OpenClaw 2026.9.9 requires explicit reverse-proxy attribution. Set `OPENCLAW_TRUSTED_PROXY_IPS` to a JSON array of verified Brev proxy IPs (for example, `'["100.73.87.46"]'` on the tested Development route). Proxy addresses are deployment-specific; do not assume this example applies to another region or route. Only individual IPs are accepted, not CIDRs or wildcards. Ensure the proxy safely overwrites/rebuilds forwarded headers. Gateway token authentication remains enabled; this setting does not enable proxy-only authentication.
+- Before restarting an existing gateway, it validates the config and uses safe, non-interactive upstream Doctor migrations when required, retaining a private rollback copy. If Doctor cannot repair it (for example, an obsolete gateway lock blocks migration), bootstrap fails with the backup location rather than starting an incompatible gateway. Inspect and resolve the reported stale process/lock before retrying; do not remove locks belonging to a running gateway.
 - It refreshes the local `~/launch-openclaw` checkout if it already exists.
 - It skips the first-run configure terminal after both `~/.openclaw/.env` and `~/.openclaw/openclaw.json` exist.
 - It reuses a running gateway if a previously started process is still alive.
@@ -133,19 +135,19 @@ The bootstrap is designed to be safe to run multiple times:
 Target a GitHub release tag:
 
 ```bash
-OPENCLAW_RELEASE_TAG=v2026.3.24 ./launch.sh
+OPENCLAW_RELEASE_TAG=v2026.9.9 ./launch.sh
 ```
 
 For piped execution:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/liveaverage/launch-openclaw/refs/heads/main/launch.sh | OPENCLAW_RELEASE_TAG=v2026.3.24 bash
+curl -fsSL https://raw.githubusercontent.com/liveaverage/launch-openclaw/refs/heads/main/launch.sh | OPENCLAW_RELEASE_TAG=v2026.9.9 bash
 ```
 
 Override the npm package version directly if needed:
 
 ```bash
-OPENCLAW_VERSION=2026.3.13 ./launch.sh
+OPENCLAW_VERSION=2026.9.9 ./launch.sh
 ```
 
 When `OPENCLAW_VERSION` is unset, `launch.sh` now resolves it from `OPENCLAW_RELEASE_TAG`. It first tries the exact tag without the leading `v`, then falls back to removing a trailing GitHub-only `-N` suffix such as `v2026.3.13-1 -> 2026.3.13`.

@@ -347,6 +347,36 @@ set_model_context_window() {
   mv "$tmp_file" "$config_file"
 }
 
+ensure_config_compatible() {
+  local config_file backup_file
+  if openclaw config validate >/dev/null 2>&1; then
+    return
+  fi
+
+  config_file="$HOME/.openclaw/openclaw.json"
+  backup_file="$(mktemp "$config_file.pre-migration.XXXXXX")"
+  chmod 600 "$backup_file"
+  (umask 077; cp "$config_file" "$backup_file")
+  chmod 600 "$backup_file"
+  log "Migrating legacy OpenClaw config; rollback copy: $backup_file"
+  # Safe, non-interactive upstream migrations only; never force a service repair.
+  openclaw doctor --fix --non-interactive || fail "Config migration failed. Original config retained at $backup_file; inspect doctor output before retrying."
+  openclaw config validate >/dev/null 2>&1 || fail "Migrated config is still invalid. Original config retained at $backup_file."
+}
+
+configure_trusted_proxies() {
+  [[ -n "${OPENCLAW_TRUSTED_PROXY_IPS:-}" ]] || return 0
+  node -e '
+    const {isIP}=require("net");
+    try {
+      const ips=JSON.parse(process.argv[1]);
+      if(!Array.isArray(ips) || !ips.length || ips.some(ip=>typeof ip!=="string" || !isIP(ip) || ip==="0.0.0.0" || ip==="::")) process.exit(1);
+    } catch { process.exit(1); }
+  ' "$OPENCLAW_TRUSTED_PROXY_IPS" || fail "OPENCLAW_TRUSTED_PROXY_IPS must be a JSON array of explicit proxy IPs, not wildcards or network ranges."
+  log "Configuring explicitly trusted reverse proxy IPs (gateway token authentication is unchanged)"
+  openclaw config set gateway.trustedProxies "$OPENCLAW_TRUSTED_PROXY_IPS" --strict-json
+}
+
 main() {
   local gateway_log approval_log pid_file token gateway_pid
 
@@ -377,7 +407,10 @@ main() {
     load_saved_env
   fi
 
+  stop_existing_gateway "$pid_file"
+  ensure_config_compatible
   configure_control_ui_origin
+  configure_trusted_proxies
 
   token="$(get_gateway_token || true)"
   if [[ -z "$token" ]]; then
@@ -386,7 +419,6 @@ main() {
     token="$(get_gateway_token || true)"
   fi
 
-  stop_existing_gateway "$pid_file"
   log "Starting OpenClaw gateway"
   gateway_pid="$(start_gateway "$gateway_log" "$pid_file")"
   log "Gateway is running with PID $gateway_pid"
