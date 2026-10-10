@@ -74,9 +74,9 @@ get_gateway_token_from_config_file() {
   [[ -f "$config_file" ]] || return 1
 
   if command -v jq >/dev/null 2>&1; then
-    token="$(jq -r '.gateway.auth.token // empty' "$config_file" 2>/dev/null | sed -n '1p')" || true
+    token="$(jq -r '.gateway.auth.token | select(type == "string")' "$config_file" 2>/dev/null | sed -n '1p')" || true
   else
-    token="$(node -e 'const fs=require("fs");const p=process.argv[1];const j=JSON.parse(fs.readFileSync(p,"utf8"));if(j?.gateway?.auth?.token)process.stdout.write(j.gateway.auth.token);' "$config_file" 2>/dev/null)" || true
+    token="$(node -e 'const fs=require("fs");const p=process.argv[1];const j=JSON.parse(fs.readFileSync(p,"utf8"));if(typeof j?.gateway?.auth?.token==="string")process.stdout.write(j.gateway.auth.token);' "$config_file" 2>/dev/null)" || true
   fi
 
   [[ -n "$token" && "$token" != "__OPENCLAW_REDACTED__" && "$token" != "null" ]] || return 1
@@ -115,12 +115,49 @@ get_gateway_token() {
   local status=$?
   set -e
 
-  if [[ "$status" -eq 0 && -n "$token" && "$token" != "null" && "$token" != "undefined" && "$token" != "__OPENCLAW_REDACTED__" ]]; then
+  if [[ "$status" -eq 0 && "$token" =~ ^[[:alnum:]_-]+$ && "$token" != "null" && "$token" != "undefined" && "$token" != "__OPENCLAW_REDACTED__" ]]; then
     printf '%s\n' "$token"
     return 0
   fi
 
   return 1
+}
+
+gateway_token_is_configured() {
+  [[ -n "${OPENCLAW_GATEWAY_TOKEN:-}" ]] && return 0
+  node -e '
+    const fs=require("fs");
+    try {
+      const token=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))?.gateway?.auth?.token;
+      if(typeof token==="string" ? token.trim().length : token && typeof token==="object" && token.source && token.id) process.exit(0);
+    } catch {}
+    process.exit(1);
+  ' "$HOME/.openclaw/openclaw.json"
+}
+
+get_dashboard_connection_url() {
+  local details origin
+  origin="$(derive_openclaw_origin)"
+  details="$(openclaw dashboard --no-open --json 2>/dev/null)" || return 1
+  printf '%s' "$details" | node -e '
+    const fs=require("fs");
+    try {
+      const details=JSON.parse(fs.readFileSync(0,"utf8"));
+      if(!details.ok) process.exit(1);
+      const generated=new URL(details.browserUrl || details.url);
+      const external=new URL(process.argv[1]);
+      const url=new URL(generated.pathname+generated.search+generated.hash,external);
+      const params=new URLSearchParams(url.hash.slice(1));
+      if(params.has("gatewayUrl")) {
+        const gateway=new URL(external);
+        gateway.protocol=external.protocol==="https:" ? "wss:" : "ws:";
+        gateway.pathname="/"; gateway.search=""; gateway.hash="";
+        params.set("gatewayUrl",gateway.origin);
+        url.hash=params.toString();
+      }
+      process.stdout.write(url.toString());
+    } catch { process.exit(1); }
+  ' "$origin"
 }
 
 start_gateway() {
@@ -214,18 +251,22 @@ start_auto_approve_loop() {
 
 derive_openclaw_origin() {
   local host_name env_id
+  if [[ -n "${OPENCLAW_ORIGIN:-}" ]]; then
+    printf '%s\n' "${OPENCLAW_ORIGIN%/}"
+    return
+  fi
   host_name="$(hostname 2>/dev/null || true)"
   env_id="$(printf '%s\n' "$host_name" | sed -E 's/^brev-([[:alnum:]]+)$/\1/')"
 
   if [[ -n "$env_id" && "$env_id" != "$host_name" ]]; then
-    printf 'https://openclaw-%s.apps.run.brev.nvidia.com\n' "$env_id"
+    printf 'https://openclaw-%s.gobrev.dev\n' "$env_id"
   else
-    printf 'http://localhost:3000\n'
+    printf 'http://localhost:18789\n'
   fi
 }
 
 configure_control_ui_origin() {
-  local origin legacy_origin env_id host_name
+  local origin legacy_origin previous_origin env_id host_name
   local origins_json
 
   origin="$(derive_openclaw_origin)"
@@ -235,8 +276,9 @@ configure_control_ui_origin() {
   # Include the legacy Launchpad-hosted Skybridge origin
   if [[ -n "$env_id" && "$env_id" != "$host_name" ]]; then
     legacy_origin="https://openclaw-${env_id}.stg.apps.launchpad.nvidia.com"
+    previous_origin="https://openclaw-${env_id}.apps.run.brev.nvidia.com"
     origins_json="$(cat <<EOF
-["http://127.0.0.1:18789","http://localhost:18789","${origin}","${legacy_origin}"]
+["http://127.0.0.1:18789","http://localhost:18789","${origin}","${previous_origin}","${legacy_origin}"]
 EOF
 )"
   else
@@ -257,7 +299,9 @@ print_gateway_info() {
 
   host_name="$(hostname 2>/dev/null || true)"
   origin="$(derive_openclaw_origin)"
-  if [[ -n "$token" ]]; then
+  if url="$(get_dashboard_connection_url)"; then
+    :
+  elif [[ -n "$token" ]]; then
     url="${origin}/#token=${token}"
   else
     url="${origin}/chat?session=main"
@@ -266,7 +310,7 @@ print_gateway_info() {
   printf '\nOpenClaw Gateway Started\n'
   printf '========================\n\n'
   printf 'URL:\n%s\n\n' "$url"
-  printf 'API Token:\n%s\n\n' "${token:-Unavailable - review $OPENCLAW_STATE_DIR/gateway.log}"
+  printf 'API Token:\n%s\n\n' "${token:-Stored as a SecretRef; use the dashboard URL above. Generate a new dashboard link if it expires.}"
   printf 'Hostname:\n%s\n\n' "${host_name:-unknown}"
   printf 'Origin:\n%s\n' "$origin"
 }
@@ -342,6 +386,36 @@ set_model_context_window() {
   mv "$tmp_file" "$config_file"
 }
 
+ensure_config_compatible() {
+  local config_file backup_file
+  if openclaw config validate >/dev/null 2>&1; then
+    return
+  fi
+
+  config_file="$HOME/.openclaw/openclaw.json"
+  backup_file="$(mktemp "$config_file.pre-migration.XXXXXX")"
+  chmod 600 "$backup_file"
+  (umask 077; cp "$config_file" "$backup_file")
+  chmod 600 "$backup_file"
+  log "Migrating legacy OpenClaw config; rollback copy: $backup_file"
+  # Safe, non-interactive upstream migrations only; never force a service repair.
+  openclaw doctor --fix --non-interactive || fail "Config migration failed. Original config retained at $backup_file; inspect doctor output before retrying."
+  openclaw config validate >/dev/null 2>&1 || fail "Migrated config is still invalid. Original config retained at $backup_file."
+}
+
+configure_trusted_proxies() {
+  [[ -n "${OPENCLAW_TRUSTED_PROXY_IPS:-}" ]] || return 0
+  node -e '
+    const {isIP}=require("net");
+    try {
+      const ips=JSON.parse(process.argv[1]);
+      if(!Array.isArray(ips) || !ips.length || ips.some(ip=>typeof ip!=="string" || !isIP(ip) || ip==="0.0.0.0" || ip==="::")) process.exit(1);
+    } catch { process.exit(1); }
+  ' "$OPENCLAW_TRUSTED_PROXY_IPS" || fail "OPENCLAW_TRUSTED_PROXY_IPS must be a JSON array of explicit proxy IPs, not wildcards or network ranges."
+  log "Configuring explicitly trusted reverse proxy IPs (gateway token authentication is unchanged)"
+  openclaw config set gateway.trustedProxies "$OPENCLAW_TRUSTED_PROXY_IPS" --strict-json
+}
+
 main() {
   local gateway_log approval_log pid_file token gateway_pid
 
@@ -372,16 +446,18 @@ main() {
     load_saved_env
   fi
 
+  stop_existing_gateway "$pid_file"
+  ensure_config_compatible
   configure_control_ui_origin
+  configure_trusted_proxies
 
   token="$(get_gateway_token || true)"
-  if [[ -z "$token" ]]; then
+  if [[ -z "$token" ]] && ! gateway_token_is_configured; then
     log "No configured gateway token found; generating one with OpenClaw doctor"
     openclaw doctor --generate-gateway-token >/dev/null
     token="$(get_gateway_token || true)"
   fi
 
-  stop_existing_gateway "$pid_file"
   log "Starting OpenClaw gateway"
   gateway_pid="$(start_gateway "$gateway_log" "$pid_file")"
   log "Gateway is running with PID $gateway_pid"

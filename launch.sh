@@ -15,8 +15,8 @@ fi
 
 CODE_SERVER_VERSION="${CODE_SERVER_VERSION:-4.89.1}"
 CODE_SERVER_PORT="${CODE_SERVER_PORT:-13337}"
-DEFAULT_OPENCLAW_VERSION="2026.3.13"
-DEFAULT_OPENCLAW_RELEASE_TAG="v2026.3.13-1"
+DEFAULT_OPENCLAW_VERSION="2026.9.9"
+DEFAULT_OPENCLAW_RELEASE_TAG="v2026.9.9"
 OPENCLAW_VERSION="${OPENCLAW_VERSION:-}"
 OPENCLAW_RELEASE_TAG="${OPENCLAW_RELEASE_TAG:-$DEFAULT_OPENCLAW_RELEASE_TAG}"
 OPENCLAW_ENV_FILE="${OPENCLAW_ENV_FILE:-$HOME/.openclaw/.env}"
@@ -203,45 +203,62 @@ is_openclaw_configured() {
 
 derive_openclaw_origin() {
   local host_name env_id
+  if [[ -n "${OPENCLAW_ORIGIN:-}" ]]; then
+    printf '%s\n' "${OPENCLAW_ORIGIN%/}"
+    return
+  fi
   host_name="$(hostname 2>/dev/null || true)"
   env_id="$(printf '%s\n' "$host_name" | sed -E 's/^brev-([[:alnum:]]+)$/\1/')"
 
   if [[ -n "$env_id" && "$env_id" != "$host_name" ]]; then
-    printf 'https://openclaw-%s.apps.run.brev.nvidia.com\n' "$env_id"
+    printf 'https://openclaw-%s.gobrev.dev\n' "$env_id"
   else
-    printf 'http://localhost:3000\n'
+    printf 'http://localhost:18789\n'
   fi
 }
 
 derive_code_server_origin() {
   local host_name env_id
+  if [[ -n "${CODE_SERVER_ORIGIN:-}" ]]; then
+    printf '%s\n' "${CODE_SERVER_ORIGIN%/}"
+    return
+  fi
   host_name="$(hostname 2>/dev/null || true)"
   env_id="$(printf '%s\n' "$host_name" | sed -E 's/^brev-([[:alnum:]]+)$/\1/')"
 
   if [[ -n "$env_id" && "$env_id" != "$host_name" ]]; then
-    printf 'https://code-server0-%s.apps.run.brev.nvidia.com\n' "$env_id"
+    printf 'https://code-server-%s.gobrev.dev\n' "$env_id"
   else
     printf 'http://localhost:%s\n' "$CODE_SERVER_PORT"
   fi
 }
 
-ensure_node() {
-  local node_major
-  node_major="$(get_node_major)"
+node_runtime_supported() {
+  local version major minor
+  version="$(node --version 2>/dev/null || true)"
+  [[ "$version" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 1
+  major="${BASH_REMATCH[1]}"
+  minor="${BASH_REMATCH[2]}"
+  # OpenClaw 2026.9.9 npm engines: >=24.16.0 <25 || >=26.1.0.
+  (( (major == 24 && minor >= 16) || (major == 26 && minor >= 1) || major > 26 ))
+}
 
-  if [[ "$node_major" -ge 22 ]]; then
-    log "Node.js $(node --version) already satisfies the >=22 requirement"
+ensure_node() {
+  if node_runtime_supported; then
+    log "Node.js $(node --version) satisfies the OpenClaw runtime requirement"
     return
   fi
 
-  log "Installing Node.js 22 from NodeSource"
+  log "Installing Node.js 24 LTS from NodeSource"
   require_cmd curl
   command -v apt-get >/dev/null 2>&1 || fail "This script currently supports Ubuntu/Debian environments with apt-get"
 
   run_as_root apt-get update
   run_as_root apt-get install -y ca-certificates curl gnupg
-  curl -fsSL https://deb.nodesource.com/setup_22.x | run_as_root bash -
+  curl -fsSL https://deb.nodesource.com/setup_24.x | run_as_root bash -
   run_as_root apt-get install -y nodejs
+
+  node_runtime_supported || fail "Node.js $(node --version) does not satisfy >=24.16.0 <25 or >=26.1.0"
 
   log "Installed Node.js $(node --version)"
 }
@@ -328,10 +345,22 @@ install_code_server_extensions() {
   run_as_root -H -u "$TARGET_USER" env HOME="$TARGET_HOME" code-server --install-extension fabiospampinato.vscode-terminals --force >/dev/null
 }
 
+configure_environment_prefix() {
+  local name value
+  # Only non-secret onboarding options belong in the generated terminal command.
+  # The code-server service does not inherit the one-shot bootstrap environment.
+  printf 'env '
+  for name in OPENCLAW_TRUSTED_PROXY_IPS OPENCLAW_ORIGIN OPENCLAW_BASE_URL OPENCLAW_MODEL OPENCLAW_CONTEXT_WINDOW; do
+    value="${!name:-}"
+    [[ -n "$value" ]] || continue
+    printf '%s=%q ' "$name" "$value"
+  done
+}
+
 configure_code_server() {
   local config_dir settings_dir settings_user_dir workspaces_dir workspace_path home_workspace_path
   local terminals_target code_server_origin terminal_cmd run_once_marker wrapper_cmd
-  local home_readme
+  local home_readme configure_env
 
   config_dir="$TARGET_HOME/.config/code-server"
   settings_dir="$TARGET_HOME/.local/share/code-server"
@@ -343,12 +372,13 @@ configure_code_server() {
   terminals_target="$TARGET_HOME/.vscode/terminals.json"
   code_server_origin="$(derive_code_server_origin)"
   run_once_marker="$TARGET_HOME/.cache/openclaw-launchable/configure-ran"
+  configure_env="$(configure_environment_prefix)"
 
   log "Configuring code-server"
   run_as_root -u "$TARGET_USER" mkdir -p "$config_dir" "$settings_user_dir" "$workspaces_dir" "$TARGET_HOME/.vscode" "$TARGET_HOME/.cache/openclaw-launchable"
   run_as_root -u "$TARGET_USER" install -m 644 "$LAUNCH_REPO_DIR/README.md" "$home_readme"
 
-  wrapper_cmd="mkdir -p \"${TARGET_HOME}/.cache/openclaw-launchable\" && if [[ -f \"${run_once_marker}\" ]]; then printf 'OpenClaw configure autorun already ran. Opening a fresh login shell.\\n\\n'; source ~/.profile >/dev/null 2>&1 || true; source ~/.bashrc >/dev/null 2>&1 || true; exec bash -l; fi; cd $(printf '%q' "$LAUNCH_REPO_DIR") && bash $(printf '%q' "$LAUNCH_REPO_DIR/configure.sh") && touch \"${run_once_marker}\"; source ~/.profile >/dev/null 2>&1 || true; source ~/.bashrc >/dev/null 2>&1 || true; exec bash -l"
+  wrapper_cmd="mkdir -p \"${TARGET_HOME}/.cache/openclaw-launchable\" && if [[ -f \"${run_once_marker}\" ]]; then printf 'OpenClaw configure autorun already ran. Opening a fresh login shell.\\n\\n'; source ~/.profile >/dev/null 2>&1 || true; source ~/.bashrc >/dev/null 2>&1 || true; exec bash -l; fi; cd $(printf '%q' "$LAUNCH_REPO_DIR") && ${configure_env}bash $(printf '%q' "$LAUNCH_REPO_DIR/configure.sh") && touch \"${run_once_marker}\"; source ~/.profile >/dev/null 2>&1 || true; source ~/.bashrc >/dev/null 2>&1 || true; exec bash -l"
   terminal_cmd="$wrapper_cmd"
 
   run_as_root -u "$TARGET_USER" tee "$terminals_target" >/dev/null <<EOF
@@ -460,7 +490,7 @@ main() {
     TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
   fi
 
-  log "Step 1/6: Ensuring Node.js >= 22"
+  log "Step 1/6: Ensuring a supported Node.js runtime"
   ensure_node
   log "Confirmed Node version: $(node --version)"
 
@@ -478,12 +508,13 @@ main() {
   enable_code_server_service
 
   if is_openclaw_configured; then
-    log "Step 5/6: OpenClaw is already configured"
+    log "Step 5/6: Starting the configured OpenClaw gateway"
+    bash "$LAUNCH_REPO_DIR/configure.sh"
   else
     log "Step 5/6: OpenClaw onboarding is deferred to configure.sh"
+    log "Step 6/6: Printing code-server access information"
+    print_configuration_pending
   fi
-  log "Step 6/6: Printing code-server access information"
-  print_configuration_pending
 }
 
 main "$@"
