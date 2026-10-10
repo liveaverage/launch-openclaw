@@ -1,0 +1,20 @@
+name: Bootstrap regression tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, codex/openclaw-development-recovery]
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate shell syntax
+        run: bash -n launch.sh configure.sh tests/bootstrap-regression.sh
+      - name: Test bootstrap URL and restart behavior
+        run: bash tests/bootstrap-regression.sh

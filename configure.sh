@@ -214,18 +214,22 @@ start_auto_approve_loop() {
 
 derive_openclaw_origin() {
   local host_name env_id
+  if [[ -n "${OPENCLAW_ORIGIN:-}" ]]; then
+    printf '%s\n' "${OPENCLAW_ORIGIN%/}"
+    return
+  fi
   host_name="$(hostname 2>/dev/null || true)"
   env_id="$(printf '%s\n' "$host_name" | sed -E 's/^brev-([[:alnum:]]+)$/\1/')"
 
   if [[ -n "$env_id" && "$env_id" != "$host_name" ]]; then
-    printf 'https://openclaw-%s.apps.run.brev.nvidia.com\n' "$env_id"
+    printf 'https://openclaw-%s.gobrev.dev\n' "$env_id"
   else
-    printf 'http://localhost:3000\n'
+    printf 'http://localhost:18789\n'
   fi
 }
 
 configure_control_ui_origin() {
-  local origin legacy_origin env_id host_name
+  local origin legacy_origin previous_origin env_id host_name
   local origins_json
 
   origin="$(derive_openclaw_origin)"
@@ -235,8 +239,9 @@ configure_control_ui_origin() {
   # Include the legacy Launchpad-hosted Skybridge origin
   if [[ -n "$env_id" && "$env_id" != "$host_name" ]]; then
     legacy_origin="https://openclaw-${env_id}.stg.apps.launchpad.nvidia.com"
+    previous_origin="https://openclaw-${env_id}.apps.run.brev.nvidia.com"
     origins_json="$(cat <<EOF
-["http://127.0.0.1:18789","http://localhost:18789","${origin}","${legacy_origin}"]
+["http://127.0.0.1:18789","http://localhost:18789","${origin}","${previous_origin}","${legacy_origin}"]
 EOF
 )"
   else

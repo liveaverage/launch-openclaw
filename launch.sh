@@ -203,23 +203,31 @@ is_openclaw_configured() {
 
 derive_openclaw_origin() {
   local host_name env_id
+  if [[ -n "${OPENCLAW_ORIGIN:-}" ]]; then
+    printf '%s\n' "${OPENCLAW_ORIGIN%/}"
+    return
+  fi
   host_name="$(hostname 2>/dev/null || true)"
   env_id="$(printf '%s\n' "$host_name" | sed -E 's/^brev-([[:alnum:]]+)$/\1/')"
 
   if [[ -n "$env_id" && "$env_id" != "$host_name" ]]; then
-    printf 'https://openclaw-%s.apps.run.brev.nvidia.com\n' "$env_id"
+    printf 'https://openclaw-%s.gobrev.dev\n' "$env_id"
   else
-    printf 'http://localhost:3000\n'
+    printf 'http://localhost:18789\n'
   fi
 }
 
 derive_code_server_origin() {
   local host_name env_id
+  if [[ -n "${CODE_SERVER_ORIGIN:-}" ]]; then
+    printf '%s\n' "${CODE_SERVER_ORIGIN%/}"
+    return
+  fi
   host_name="$(hostname 2>/dev/null || true)"
   env_id="$(printf '%s\n' "$host_name" | sed -E 's/^brev-([[:alnum:]]+)$/\1/')"
 
   if [[ -n "$env_id" && "$env_id" != "$host_name" ]]; then
-    printf 'https://code-server0-%s.apps.run.brev.nvidia.com\n' "$env_id"
+    printf 'https://code-server-%s.gobrev.dev\n' "$env_id"
   else
     printf 'http://localhost:%s\n' "$CODE_SERVER_PORT"
   fi
@@ -478,12 +486,13 @@ main() {
   enable_code_server_service
 
   if is_openclaw_configured; then
-    log "Step 5/6: OpenClaw is already configured"
+    log "Step 5/6: Starting the configured OpenClaw gateway"
+    bash "$LAUNCH_REPO_DIR/configure.sh"
   else
     log "Step 5/6: OpenClaw onboarding is deferred to configure.sh"
+    log "Step 6/6: Printing code-server access information"
+    print_configuration_pending
   fi
-  log "Step 6/6: Printing code-server access information"
-  print_configuration_pending
 }
 
 main "$@"

@@ -38,7 +38,7 @@ To generate an API key, visit [build.nvidia.com/settings/api-keys](https://build
    ========================
 
    URL:
-   https://openclaw-xxxxxxxx.apps.run.brev.nvidia.com/#token=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   https://openclaw-xxxxxxxx.gobrev.dev/#token=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
    API Token:
    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -47,10 +47,10 @@ To generate an API key, visit [build.nvidia.com/settings/api-keys](https://build
    brev-xxxxxxxx
 
    Origin:
-   https://openclaw-xxxxxxxx.apps.run.brev.nvidia.com
+   https://openclaw-xxxxxxxx.gobrev.dev
    ```
 
-1. Copy the full URL (looks like `https://openclaw-xxxxxxxx.apps.run.brev.nvidia.com/#token=xxx...`) and open it in a new tab.
+1. Copy the full URL (looks like `https://openclaw-xxxxxxxx.gobrev.dev/#token=xxx...`) and open it in a new tab.
 1. Click the "Connect" button to open the OpenClaw chat interface. You may need to click this button more than once.
 1. Start chatting with the agent.
 
@@ -98,16 +98,26 @@ The launchable is split into two stages:
 On hosts named like `brev-<env_id>`, the launchable derives:
 
 ```text
-OpenClaw:   https://openclaw-<env_id>.apps.run.brev.nvidia.com/chat?session=main
-code-server: https://code-server0-<env_id>.apps.run.brev.nvidia.com
+OpenClaw:   https://openclaw-<env_id>.gobrev.dev/chat?session=main
+code-server: https://code-server-<env_id>.gobrev.dev
 ```
 
 If the hostname does not match the Brev naming pattern, it falls back to:
 
 ```text
-OpenClaw:   http://localhost:3000/chat?session=main
+OpenClaw:   http://localhost:18789/chat?session=main
 code-server: http://localhost:13337
 ```
+
+The Brev console (or `brev ports ls <instance> --json`) is authoritative for
+secure-link URLs. For custom service names or domains, set `OPENCLAW_ORIGIN`
+and `CODE_SERVER_ORIGIN` to the exact HTTPS origins before running the scripts.
+The Control UI retains the previous Brev and legacy LaunchPad origins alongside
+the current origin; it does not enable wildcard origins or disable token auth.
+
+After configuration, re-running `launch.sh` restarts the gateway using the saved
+credentials instead of displaying the first-run configuration prompt. This is
+a bootstrap re-run guarantee, not an automatic gateway restart after a VM reboot.
 
 ### Re-run Safety
 
@@ -160,7 +170,7 @@ OpenClaw Gateway Started
 ========================
 
 URL:
-https://openclaw-<env_id>.apps.run.brev.nvidia.com/chat?session=main
+https://openclaw-<env_id>.gobrev.dev/chat?session=main
 
 API Token:
 <token>
@@ -169,10 +179,10 @@ Hostname:
 brev-<env_id>
 
 Origin:
-https://openclaw-<env_id>.apps.run.brev.nvidia.com
+https://openclaw-<env_id>.gobrev.dev
 
 code-server:
-https://code-server0-<env_id>.apps.run.brev.nvidia.com
+https://code-server-<env_id>.gobrev.dev
 ```
 
 ### Logs and State
