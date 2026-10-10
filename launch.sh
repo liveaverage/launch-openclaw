@@ -345,10 +345,22 @@ install_code_server_extensions() {
   run_as_root -H -u "$TARGET_USER" env HOME="$TARGET_HOME" code-server --install-extension fabiospampinato.vscode-terminals --force >/dev/null
 }
 
+configure_environment_prefix() {
+  local name value
+  # Only non-secret onboarding options belong in the generated terminal command.
+  # The code-server service does not inherit the one-shot bootstrap environment.
+  printf 'env '
+  for name in OPENCLAW_TRUSTED_PROXY_IPS OPENCLAW_ORIGIN OPENCLAW_BASE_URL OPENCLAW_MODEL OPENCLAW_CONTEXT_WINDOW; do
+    value="${!name:-}"
+    [[ -n "$value" ]] || continue
+    printf '%s=%q ' "$name" "$value"
+  done
+}
+
 configure_code_server() {
   local config_dir settings_dir settings_user_dir workspaces_dir workspace_path home_workspace_path
   local terminals_target code_server_origin terminal_cmd run_once_marker wrapper_cmd
-  local home_readme
+  local home_readme configure_env
 
   config_dir="$TARGET_HOME/.config/code-server"
   settings_dir="$TARGET_HOME/.local/share/code-server"
@@ -360,12 +372,13 @@ configure_code_server() {
   terminals_target="$TARGET_HOME/.vscode/terminals.json"
   code_server_origin="$(derive_code_server_origin)"
   run_once_marker="$TARGET_HOME/.cache/openclaw-launchable/configure-ran"
+  configure_env="$(configure_environment_prefix)"
 
   log "Configuring code-server"
   run_as_root -u "$TARGET_USER" mkdir -p "$config_dir" "$settings_user_dir" "$workspaces_dir" "$TARGET_HOME/.vscode" "$TARGET_HOME/.cache/openclaw-launchable"
   run_as_root -u "$TARGET_USER" install -m 644 "$LAUNCH_REPO_DIR/README.md" "$home_readme"
 
-  wrapper_cmd="mkdir -p \"${TARGET_HOME}/.cache/openclaw-launchable\" && if [[ -f \"${run_once_marker}\" ]]; then printf 'OpenClaw configure autorun already ran. Opening a fresh login shell.\\n\\n'; source ~/.profile >/dev/null 2>&1 || true; source ~/.bashrc >/dev/null 2>&1 || true; exec bash -l; fi; cd $(printf '%q' "$LAUNCH_REPO_DIR") && bash $(printf '%q' "$LAUNCH_REPO_DIR/configure.sh") && touch \"${run_once_marker}\"; source ~/.profile >/dev/null 2>&1 || true; source ~/.bashrc >/dev/null 2>&1 || true; exec bash -l"
+  wrapper_cmd="mkdir -p \"${TARGET_HOME}/.cache/openclaw-launchable\" && if [[ -f \"${run_once_marker}\" ]]; then printf 'OpenClaw configure autorun already ran. Opening a fresh login shell.\\n\\n'; source ~/.profile >/dev/null 2>&1 || true; source ~/.bashrc >/dev/null 2>&1 || true; exec bash -l; fi; cd $(printf '%q' "$LAUNCH_REPO_DIR") && ${configure_env}bash $(printf '%q' "$LAUNCH_REPO_DIR/configure.sh") && touch \"${run_once_marker}\"; source ~/.profile >/dev/null 2>&1 || true; source ~/.bashrc >/dev/null 2>&1 || true; exec bash -l"
   terminal_cmd="$wrapper_cmd"
 
   run_as_root -u "$TARGET_USER" tee "$terminals_target" >/dev/null <<EOF

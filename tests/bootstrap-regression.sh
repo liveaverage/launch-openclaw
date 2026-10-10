@@ -3,6 +3,28 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 passes=0
 
+for option in OPENCLAW_TRUSTED_PROXY_IPS OPENCLAW_ORIGIN OPENCLAW_BASE_URL OPENCLAW_MODEL OPENCLAW_CONTEXT_WINDOW; do
+  (
+    eval "$(sed '$d' "$ROOT/launch.sh")"
+    unset OPENCLAW_TRUSTED_PROXY_IPS OPENCLAW_ORIGIN OPENCLAW_BASE_URL OPENCLAW_MODEL OPENCLAW_CONTEXT_WINDOW
+    value='literal spaces; $(exit 7) "quotes"'
+    printf -v "$option" '%s' "$value"
+    export NVIDIA_API_KEY=qa-secret-never-persist CUSTOM_API_KEY=qa-secret-never-persist OPENCLAW_GATEWAY_TOKEN=qa-secret-never-persist
+    prefix="$(configure_environment_prefix)"
+    [[ "$prefix" != *qa-secret* && "$prefix" != *API_KEY* && "$prefix" != *GATEWAY_TOKEN* ]]
+    actual="$(env -u "$option" bash -c "${prefix}printenv $option")"
+    [[ "$actual" == "$value" ]]
+  )
+  passes=$((passes + 1))
+done
+
+(
+  eval "$(sed '$d' "$ROOT/launch.sh")"
+  unset OPENCLAW_TRUSTED_PROXY_IPS OPENCLAW_ORIGIN OPENCLAW_BASE_URL OPENCLAW_MODEL OPENCLAW_CONTEXT_WINDOW
+  [[ "$(configure_environment_prefix)" == 'env ' ]]
+)
+passes=$((passes + 1))
+
 for runtime in v22.23.3 v24.15.9 v24.16.0 v24.21.0 v24.16.0-rc.1 v25.0.0 v26.0.9 v26.1.0 v27.0.0 unavailable; do
   (
     eval "$(sed '$d' "$ROOT/launch.sh")"
