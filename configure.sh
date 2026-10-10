@@ -152,7 +152,7 @@ get_dashboard_connection_url() {
         const gateway=new URL(external);
         gateway.protocol=external.protocol==="https:" ? "wss:" : "ws:";
         gateway.pathname="/"; gateway.search=""; gateway.hash="";
-        params.set("gatewayUrl",gateway.toString());
+        params.set("gatewayUrl",gateway.origin);
         url.hash=params.toString();
       }
       process.stdout.write(url.toString());

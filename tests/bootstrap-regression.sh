@@ -115,7 +115,7 @@ done
   url="$(get_dashboard_connection_url)"
   node -e '
     const url=new URL(process.argv[1]); const params=new URLSearchParams(url.hash.slice(1));
-    if(url.origin!=="https://openclaw-u1x29ihj3.gobrev.dev" || params.get("bootstrapToken")!=="qa-fake-bootstrap" || params.get("gatewayUrl")!=="wss://openclaw-u1x29ihj3.gobrev.dev/") process.exit(1);
+    if(url.origin!=="https://openclaw-u1x29ihj3.gobrev.dev" || params.get("bootstrapToken")!=="qa-fake-bootstrap" || params.get("gatewayUrl")!=="wss://openclaw-u1x29ihj3.gobrev.dev") process.exit(1);
   ' "$url"
 )
 passes=$((passes + 1))
